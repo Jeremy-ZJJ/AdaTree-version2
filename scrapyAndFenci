@@ -1,0 +1,110 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri May  5 19:19:29 2017
+
+@author: Jeremy
+"""
+
+import requests
+from lxml import etree
+import pandas as pd
+import jieba
+
+def getUrl():
+    url=['http://www.shfe.com.cn/news/news/index_%d.html',
+         'http://roll.finance.sina.com.cn/finance/gjs/hjzx/index_%d.shtml']
+    return url
+
+def getXpath():
+    xpathstr=['//*[@id="main"]/div[3]/div[2]/div/div[2]/ul/li[%d]/a/text()',
+              '//*[@id="Main"]/div[3]/ul[1]/li[%d]/a/text()']
+    return xpathstr
+
+def pageAndTitle():
+    page=[24,5]
+    titleNum=[8,5]
+    return page,titleNum
+
+def filterOut(titlelist):
+    filterlist=[]
+    strlist=['金属','金融','冶金']
+    for i in titlelist:
+        for j in strlist:
+            if j in i:
+                i=i.replace(j,'')
+        filterlist.append(i)
+    return filterlist
+
+class titleProcess(object):
+    def __init__(self,content):
+        self.content=content
+
+    def clear(self):
+        while ' ' in self.content:
+            self.content=self.content.replace(' ','')
+        return self.content
+        
+def getOnePageTitle(url,j):
+    
+    urlList=getUrl()
+    urlIndex=urlList.index(url)
+    page,titleNum=pageAndTitle()
+    
+    if urlIndex==0 and j==0:
+        url=url.replace('_','')%j
+    else:
+        url=url%j
+            
+    urlXpath=getXpath()[urlIndex]
+    
+    html=requests.get(url)
+    selector=etree.HTML(html.content)
+    titlelist=[]
+    for i in range(titleNum[urlIndex]):
+        xpathstr=urlXpath%i
+        title=selector.xpath(xpathstr)
+        if title==[]:
+            continue
+        else:
+            titlelist.append(titleProcess(title[0]).clear())
+    return titlelist
+
+def getAllPageTitle(k):
+    url=getUrl()[k]
+    page,titleNum=pageAndTitle()
+    titlelist=[]
+    for j in range(page[k]):
+        titlelist.extend(getOnePageTitle(url,j))
+    return titlelist
+
+def filterNews(k=1):
+    titlelist=getAllPageTitle(k)
+    filterList=filterOut(titlelist)
+    for i in range(len(titlelist)):
+        if '金' in filterList[i]:
+            print (titlelist[i])        
+    return
+'''
+def writeNews(k=1):
+    titlelist=getAllPageTitle(k)
+    filterList=filterOut(titlelist)
+    with open('fencitest.txt','w') as f:
+        for i in range(len(titlelist)):
+            if '金' in filterList[i]:
+                f.write(titlelist[i])
+'''
+def getFenci(string='fencitest.txt'):
+    f1=open(string)       
+    f2=open('fenci_result.txt','a')
+    lines=f1.readlines()
+    for line in lines:
+        line.replace('\t','').replace('\n','').replace(' ','')
+        seg_list=jieba.cut(line,cut_all=False)
+        f2.write(' '.join(seg_list))
+    f1.close()
+    f2.close()
+    return
+
+            
+            
+
