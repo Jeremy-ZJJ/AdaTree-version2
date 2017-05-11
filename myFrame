@@ -1,0 +1,801 @@
+# -*- coding: utf-8 -*-
+#myFrame.py源程序清单
+#Frame类继承了DataFrame，又增加了一些特有的方法
+import numpy as np
+import pandas as pd
+from pandas import Panel,DataFrame,Series
+import inspect 
+import talib
+
+NA=np.nan
+
+def objToFrames(obj):
+    return Frames(obj)
+    
+def reduceWithAnalytics(panel, suffix = '', **namesAndUfuncs):
+    """
+    frm = Frames({"A":[1,2,3,2,3,3],"B":[1,2,3,4,5,6],"C":[2,3,4,5,6,7]})
+    panel = frm.groupToPanel(key="A")
+    frms=reduceWithAnalytics(panel, suffix = '', B=np.sum,C=np.sum)
+    for i in range(len(frms)): print(frms[i])
+       A    C    B
+    0  1    2    1
+    --------------------
+       A    C    B
+    0  2    5    4
+    --------------------
+       A    C    B
+    0  3    7    6
+    frms=reduceWithAnalytics(panel, suffix = '.sum', B=np.sum,C=np.sum)
+    for i in range(len(frms)): print(frms[i])
+       A  C.sum  B.sum
+    0  1      2      1
+    --------------------
+       A  C.sum  B.sum
+    0  2      8      6
+    --------------------
+       A  C.sum  B.sum
+    0  3     17     14
+    
+    """
+    frms=[]
+    for index0  in panel.axes[0]:
+        frm0 = Frames(panel[index0])  #从panel中取出一个frm
+        newFrm = Frames([])
+        newFrm[panel.name] = [index0]
+        for  name, uFunc in namesAndUfuncs.items():
+             newFrm[name if suffix == "" else name+suffix] =  uFunc(frm0[name])
+        frms.append(newFrm)  #创建新表后append
+    return objToFrames(frms)
+
+class Frames(DataFrame):
+    def getTestFrame(self):
+        """
+        df1 = Frames() 
+        df1 = df1.getTestFrame()
+        print(df1)
+                                 A  B    C                     D      E
+           0  20170101 00:00:00.00  1  1.0                   NaN      a
+           1  20170102 00:00:00.00  2  2.2  20170101 00:00:00.00     bb
+           2  20170103 00:00:00.00  4  3.5  20170102 00:00:00.00    ccc
+           3  20170104 00:00:00.00  7  NaN  20170103 00:00:00.00   dddd
+           4  20171005 00:00:00.00  8  5.1  20170104 00:00:00.00  eeeee
+        """
+        dict0={'A':["20170101 00:00:00.00","20170102 00:00:00.00","20170103 00:00:00.00",\
+                    "20170104 00:00:00.00", "20171005 00:00:00.00"],\
+               'B' : [1, 2, 4, 7, 8],\
+               'C' : [1.0, 2.2, 3.5, np.NaN, 5.1],\
+               'D' : [np.NaN,"20170101 00:00:00.00", "20170102 00:00:00.00", \
+                     "20170103 00:00:00.00", "20170104 00:00:00.00"],\
+               'E' : ['a', 'bb', 'ccc', 'dddd', 'eeeee'] }
+        #ss=pd.DataFrame(dict0)       
+        return objToFrames(self.from_dict(dict0))
+                
+    def replaceValueWithNewValue(self,value,newValue):
+        """
+        frm=Frames([])
+        frm = frm.getTestFrame()
+        frm = frm.replaceValuesWithNewValues(np.nan,999)
+        print(frm)
+                              A  B      C                     D      E
+        0  20170101 00:00:00.00  1    1.0                   999      a
+        1  20170102 00:00:00.00  2    2.2  20170101 00:00:00.00     bb
+        2  20170103 00:00:00.00  4    3.5  20170102 00:00:00.00    ccc
+        3  20170104 00:00:00.00  7  999.0  20170103 00:00:00.00   dddd
+        4  20171005 00:00:00.00  8    5.1  20170104 00:00:00.00  eeeee
+        """ 
+        self.replace(value,newValue)
+        return objToFrames(self)
+        
+    def columnsFromValues(self, **namesAndValues):
+        """        
+        frm=Frames([])
+        frm = frm.getTestFrame()
+        frm = frm.columnsFromValues(n1=[0.1,0.2,0.3,0.4,0.5],n2=[1.1,2.1,3.1,4.1,5.1])
+        print(frm)
+                              A  B    C                     D      E   n2   n1
+        0  20170101 00:00:00.00  1  1.0                   NaN      a  1.1  0.1
+        1  20170102 00:00:00.00  2  2.2  20170101 00:00:00.00     bb  2.1  0.2
+        2  20170103 00:00:00.00  4  3.5  20170102 00:00:00.00    ccc  3.1  0.3
+        3  20170104 00:00:00.00  7  NaN  20170103 00:00:00.00   dddd  4.1  0.4
+        4  20171005 00:00:00.00  8  5.1  20170104 00:00:00.00  eeeee  5.1  0.5
+        """        
+        return objToFrames(self.concatFrm(DataFrame.from_dict(namesAndValues),axis=1,ignore_index=False))
+          
+    def addColumnsFromDict(self, **namesAndValues):
+        """        
+        frm=Frames([])
+        frm = frm.getTestFrame()
+        frm = frm.addColumnsFromDict(n1=[0.1,0.2,0.3,0.4,0.5],n2=[1.1,2.1,3.1,4.1,5.1])
+        print(frm)
+                              A  B    C                     D      E   n2   n1
+        0  20170101 00:00:00.00  1  1.0                   NaN      a  1.1  0.1
+        1  20170102 00:00:00.00  2  2.2  20170101 00:00:00.00     bb  2.1  0.2
+        2  20170103 00:00:00.00  4  3.5  20170102 00:00:00.00    ccc  3.1  0.3
+        3  20170104 00:00:00.00  7  NaN  20170103 00:00:00.00   dddd  4.1  0.4
+        4  20171005 00:00:00.00  8  5.1  20170104 00:00:00.00  eeeee  5.1  0.5
+        """        
+        return objToFrames(self.concatFrm(DataFrame.from_dict(namesAndValues),axis=1,ignore_index=False))
+
+    def appendOther(self,other,ignore_index=True,how='inner'):
+        #other可以是frm,dict,Series
+        """
+        frm1 = Frames({'A':[1,2,3],'B':[4,5,6],'C1':[7,8,9]})
+        frm2 = Frames({'A':[11,22,33],'B':[44,55,66],'C2':[77,88,99]})
+        frm3=frm1.appendOther(frm2,how="outer",ignore_index=False)
+        print(frm3)
+        frm4=frm1.appendOther(frm2)
+        print(frm4)
+                A   B  C1  C2
+            0   1   4   7 NaN
+            1   2   5   8 NaN
+            2   3   6   9 NaN
+            0  11  44 NaN  77
+            1  22  55 NaN  88
+            2  33  66 NaN  99
+                B   A
+            0   4   1
+            1   5   2
+            2   6   3
+            3  44  11
+            4  55  22
+            5  66  33
+        """        
+        if how == 'inner':
+           list_inner=list(set(self.keys())&set(other.keys())) # &交集 
+           return self.append(other,ignore_index)[list_inner]
+        else: #'outer' 列名的并集
+           return objToFrames(self.append(other,ignore_index))
+
+    def concatFrm(self,other,axis=0, join='outer', join_axes=None, \
+              ignore_index=False, keys=None, levels=None, names=None, \
+              verify_integrity=False, copy=True):
+        """
+        >>>frm1 = Frames({'A':[1,2,3],'B':[4,5,6],'C1':[7,8,9]})
+        >>>frm2 = Frames({'A':[11,22,33],'B':[44,55,66],'C2':[77,88,99]})
+        >>>frm3=frm1.concatFrm(frm2,ignore_index=True)
+        结果同appendOther
+        pd.concat(objs,axis=0, join='outer', join_axes=None, ignore_index=False,
+        keys=None, levels=None, names=None, verify_integrity=False, copy=True):  
+
+        """        
+        return objToFrames( pd.concat([self,other],axis, join, join_axes,ignore_index,\
+                keys, levels, names, verify_integrity, copy) )
+        
+    def interpolateOther(self, other, keyColName, addDefault = True):
+        """
+        >>>frm1 = Frames({'A':[1,3,4,7,8],'B':[11,31,41,71,81]})
+        >>>otherFrm = Frames({'A':[2,3,5,6,7],'C':[22,NA,NA,62,72]})
+        >>>frm3 =frm1.interpolateOther(otherFrm, keyColName='A')
+        >>>print(frm1) ; print(otherFrm); print(frm3)
+           A   B
+        0  1  11
+        1  3  31
+        2  4  41
+        3  7  71
+        4  8  81
+           A   C
+        0  2  22
+        1  3 NaN
+        2  5 NaN
+        3  6  62
+        4  7  72
+           A   B   C
+        0  1  11 NaN
+        1  3  31  22
+        2  4  41  22
+        3  7  71  72
+        4  8  81  72        
+        """   
+        frm = other.merge(self.loc[:,[keyColName]],on=keyColName,sort=True,how="outer"). \
+               fillna(method="ffill")        
+        return objToFrames(self.merge(frm, on=keyColName, how="left"))
+        
+    def removeColumns(self,cols):
+        """        
+        >>>frm = Frames({'A':[1,NA,3,4,7],'B':[2,1,3.1,4.1,NA],'C':[22,1,3.1,4.1,NA]})
+        >>>print(frm.removeColumns(['A',"B"]))       
+            A    B     C
+        0   1  2.0  22.0
+        1 NaN  1.0   1.0
+        2   3  3.1   3.1
+        3   4  4.1   4.1
+        4   7  NaN   NaN
+              C
+        0  22.0
+        1   1.0
+        2   3.1
+        3   4.1
+        4   NaN
+        """
+        return objToFrames(self.drop(cols,axis=1)) #self已删除column
+    
+    def filterIn(self, ufunc): #返回满足条件的行组成的表.原frm未改。问题：index是否要重排    
+        """
+        >>>frm = Frames({'A':[1,NA,3,4,7],'B':[2,1,3.1,4.1,5.5],'C':[22,1,3.1,4.1,NA]})
+        >>>print(frm.filterIn(lambda A,B: (A>2)&(B<5) ) )
+           A    B    C
+        2  3  3.1  3.1
+        3  4  4.1  4.1
+        """
+        argNames=inspect.getargspec(ufunc)[0] #取出自定义函数的参数名
+        list_columns=[self.loc[:,argNames[i]]  for i in range(len(argNames))] #取参数对应的列          
+        return objToFrames(self.loc[ufunc(*list_columns),:])  
+        
+    def filterOutNans(self,colNames): #返回：删去colNames中有NaN的行后形成的frm
+        """
+        >>>frm = Frames({'A':[1,NA,3,4,5],'B':[11,21,NA,41,51],'C':[12,22,32,42,NA]})
+        >>>print( frm.filterOutNans(['A','C']) )
+           A   B   C
+        0  1  11  12
+        2  3  NaN 32
+        3  4  41  42
+        """
+        return objToFrames(self.loc[self[colNames].notnull().all(axis=1)] )
+
+    def unique(self, ColNames = None):#返回删去重复行后list_ColName组成的frm  
+        """        
+        >>>frm = Frames({'A':[1,1,3,3,1],'B':[1,2,2,NA,1],'C':[1,2,3,4,1]})
+        >>>print(frm.unique())
+        >>>print(frm.unique(['A','C']))
+           A   B  C
+        0  1   1  1
+        1  1   2  2
+        2  3   2  3
+        3  3 NaN  4
+           A  C
+        0  1  1
+        1  1  2
+        2  3  3
+        3  3  4
+        """
+        if ColNames==None :         
+            return self.loc[self.duplicated()==False]
+        return objToFrames(self.loc[self.loc[:,ColNames].duplicated()==False,ColNames])
+
+    def fromColumns(self,colNames, values):  #创建新表
+        """
+        frm = Frames([])
+        print(frm.fromColumns(['A','B'],[[1,2,3,4,5],[11,22,33,NA,55]]))
+           A   B
+        0  1  11
+        1  2  22
+        2  3  33
+        3  4 NaN
+        4  5  55
+        """        
+        return objToFrames(self.from_dict(dict(zip(colNames, values))))
+
+ 
+
+    def renameColumns(self, **namesAndNewNames):
+        """
+        frm = Frames({"A":[0.1,0.2,0.3],"B":[1.1,2.1,3.1]})
+        print(frm.renameColumns(A="newA",B="newB"))
+           newA  newB
+        0   0.1   1.1
+        1   0.2   2.1
+        2   0.3   3.1
+        """
+        return objToFrames( self.rename_axis(namesAndNewNames,axis = "columns" )  )
+
+    """
+    def sort(self, keyColNames): #这个方法和DataFrame一样，只是keyColNames顺序是相反的
+    """    
+    def groupToFrame3D(self,key):
+        """
+        frm = Frames({"Key":["A","A","A","B","B","C"],"v1":[0,1,2,3,4,5],"v2":[6,7,8,9,10,11]})
+        print(frm)
+        frm1 = frm.groupToFrame(key="Key")
+        print(frm1["A"])
+        print(frm1["B"])
+        print(frm1["C"]) #输出结果如下：
+
+           Key  v1  v2
+        0    A   0   6
+        1    A   1   7
+        2    A   2   8
+        3    B   3   9
+        4    B   4  10
+        5    C   5  11
+
+        0  v1  v2
+        0   0   6
+        1   1   7
+        2   2   8
+        Name: A, dtype: object
+
+        0  v1  v2
+        3   3   9
+        4   4  10
+        Name: B, dtype: object
+
+        0  v1  v2
+        5   5  11
+        Name: C, dtype: object
+        """
+        list_valueOfKey=list(self.loc[:,key].unique())
+        list_frm = [ [self[self.loc[:,key]==value].drop(key,axis=1)]  for value in list_valueOfKey]
+        return objToFrames( self.fromColumns(list_valueOfKey, list_frm)) 
+        
+    def C(self,list_colName):
+        """
+        frm = Frames({"Key":["A","B","C","D"],"v1":[0,1,2,3],"v2":[6,7,8,9]})
+        print(frm.C(["v1","v2"]))
+           v1  v2
+        0   0   6
+        1   1   7
+        2   2   8
+        3   3   9
+        """
+        return objToFrames(self[list_colName])
+    def C1(self,list_colName):
+        """
+        frm = Frames({"A":[0,1,2,3,4],"B":[10,11,12,13,14]})
+        print(frm.C1(["A"]))
+        [0 1 2 3 4]
+        print(frm.C1(["A","B"]))
+        [[ 0  1  2  3  4]
+         [10 11 12 13 14]]
+        """
+        _list = self[list_colName].T.values
+        return _list if len(_list)>1 else _list[0]
+        
+    def sort0(self, keyColNames):
+        """       
+        frm = Frames({"Key":["A","B","C","D"],"v1":[4,2,1,3],"v2":[7,9,7,5]})
+        print(frm)
+        print(frm.sort0(["v2","v1"]))
+          Key  v1  v2
+        0   A   4   7
+        1   B   2   9
+        2   C   1   7
+        3   D   3   5
+          Key  v1  v2
+        3   D   3   5
+        2   C   1   7
+        0   A   4   7
+        1   B   2   9
+        """        
+        return self.sort(keyColNames)
+    def lag(self, colNames, offset, laggedColNames = None, paddings = None, suffix = None):
+        """
+        frm = Frames({"Key":["A","B","C","D","E"],"U":[1,NA,3,4,5],"V":[NA,6,7,8,9]})
+        print(frm.lag(["U","V"], -1,paddings=[[99],[88]]))
+        frm = Frames({"Key":["A","B","C","D","E"],"U":[1,NA,3,4,5],"V":[NA,6,7,8,9]})
+        print(frm.lag(["U","V"], -1))
+           Key   U   V  Ulag-1  Vlag-1
+        0   A   1 NaN     NaN       6
+        1   B NaN   6       3       7
+        2   C   3   7       4       8
+        3   D   4   8       5       9
+        4   E   5   9      99      88
+
+        print(frm.lag(["U","V"], -2))
+           Key   U   V  Ulag-2  Vlag-2
+        0   A   1 NaN       3       7
+        1   B NaN   6       4       8
+        2   C   3   7       5       9
+        3   D   4   8       5       9
+        4   E   5   9       5       9
+
+        frm = Frames({"Key":["A","B","C","D","E"],"U":[1,NA,3,4,5],"V":[NA,6,7,8,9]})
+        print(frm.lag(["U","V"], -1,paddings=[[99],[88]]))
+          Key   U   V  Ulag-1  Vlag-1
+        0   A   1 NaN     NaN       6
+        1   B NaN   6       3       7
+        2   C   3   7       4       8
+        3   D   4   8       5       9
+        4   E   5   9      99      88
+        frm = Frames({"Key":["A","B","C","D","E"],"U":[1,NA,3,4,5],"V":[NA,6,7,8,9]})
+        print(frm.lag(["U","V"], 1))
+          Key   U   V  Ulag1  Vlag1
+        0   A   1 NaN      1    NaN
+        1   B NaN   6      1    NaN
+        2   C   3   7    NaN      6
+        3   D   4   8      3      7
+        4   E   5   9      4      8
+
+        """        
+        for i, name in enumerate(colNames):
+            lagName = name+"lag"+str(offset)
+            list0 = list(self.loc[:,name])
+            if offset>0:        
+               s=[list0[0]]*offset if paddings==None else paddings[i]
+               self.loc[:,lagName] = s + list0[:-offset]
+            else:
+               s=[list0[-1]]*(-offset) if paddings==None else paddings[i]
+               self.loc[:,lagName] = list0[-offset:] + s
+        return objToFrames(self)       
+
+    def renameColumns(self, **namesAndNewNames):
+        """
+        frm = Frames({"A":[0.1,0.2,0.3],"B":[1.1,2.1,3.1]})
+        print(frm.renameColumns(A="newA",B="newB"))
+           newA  newB
+        0   0.1   1.1
+        1   0.2   2.1
+        2   0.3   3.1
+        """
+        return objToFrames(self.rename(index=str,columns=namesAndNewNames) )
+
+    def fromRows(self,colNames, rows, typeDict = {}): #typeDict = {}  not used
+        """
+        frm = Frames({"A":[1,4,2,3,5],"B":[1.1,2.1,3.1,4.1,5.1]})
+        print(frm.getReturn(offset = 1, A="returnA"))
+           A    B  returnA
+        0  1  1.1        0
+        1  4  2.1        3
+        2  2  3.1       -2
+        3  3  4.1        1
+        4  5  5.1        2
+        """
+        
+        return objToFrames( self.fromColumns(colNames,zip(*rows)) )   
+
+    def getReturn(self, offset = 1, useLogReturn = True, paddings=0, **namesAndLaggedNames):
+        """      
+        frm = Frames({"A":[1,4,2,3,5],"B":[1.1,2.1,3.1,4.1,5.1]})
+        print(frm.getReturn(offset = 1,useLogReturn=True, paddings=99, A="logReturnA"))
+   A    B  logReturnA
+        0  1  1.1   99.000000
+        1  4  2.1    1.386294
+        2  2  3.1   -0.693147
+        3  3  4.1    0.405465
+        4  5  5.1    0.510826
+        print(frm.getReturn(offset = -2,useLogReturn=True, A="logReturnA"))
+           A    B  logReturnA
+        0  1  1.1   -0.693147
+        1  4  2.1    0.287682
+        2  2  3.1   -0.916291
+        3  3  4.1    0.000000
+        4  5  5.1    0.000000
+        print(frm.getReturn(offset = 2,useLogReturn=False, A="returnA"))
+           A    B  logReturnA  returnA
+        0  1  1.1   -0.693147        0
+        1  4  2.1    0.287682        0
+        2  2  3.1   -0.916291        1
+        3  3  4.1    0.000000       -1
+        4  5  5.1    0.000000        3
+        print(frm.getReturn(offset = -1,useLogReturn=False, A="returnA",B="returnB"))
+           A    B  logReturnA  returnA  returnB
+        0  1  1.1   -0.693147       -3       -1
+        1  4  2.1    0.287682        2       -1
+        2  2  3.1   -0.916291       -1       -1
+        3  3  4.1    0.000000       -2       -1
+        4  5  5.1    0.000000        0        0
+    def getReturn(self, offset = 1, useLogReturn = True,paddings=0, **namesAndLaggedNames):
+        """  
+        for name,laggedName in namesAndLaggedNames.items():
+            if useLogReturn:
+               list0 = list(np.log(self.loc[:,name].div(self.loc[:,name].shift(offset))))
+            else:
+               list0 = list(self.loc[:,name].diff(offset))                  
+            if offset>0:
+               self.loc[:,laggedName] = [paddings]*offset + list0[offset:]
+            else:
+               self.loc[:,laggedName] = list0[:offset] + [paddings]*(-offset)
+        return objToFrames(self)
+        
+    def getMFI(self,period,**outAndInseqNames):
+        def _getOutSeq(seq1,seq2,seq3,seq4):
+            if len(seq1)<period:
+                return np.zeros_like(seq1)*np.nan
+            else:
+                return talib.MFI(np.float_(seq1),np.float_(seq2),np.float_(seq3),np.float_(seq4),period)
+        for outSeqName,inSeqName in outAndInseqNames.items():
+            self[outSeqName]=_getOutSeq(self[inSeqName[0]],self[inSeqName[1]],self[inSeqName[2]],self[inSeqName[3]])
+        return objToFrames(self)
+    
+    def getEMA(self,period,**namesAndEMANames):
+        def _getEMACol(seq):
+            if len(seq)<period:
+                return np.zeros_like(seq)*np.nan
+            elif period==1:
+                return talib.MA(np.float_(seq),period)
+            else:
+                return talib.EMA(np.float_(seq),period)
+        for name,maName in namesAndEMANames.items():
+            self[maName]=_getEMACol(self[name])
+        return objToFrames(self)
+    
+    def getDiffEMA(self,fastPeriod,slowPeriod,**namesAndDiffEMANames):
+        for name,diffEMAName in namesAndDiffEMANames.items():
+            _EMANames=['_'+name+'EMA'+str(fastPeriod),'_'+name+'EMA'+str(slowPeriod)]
+            self.getEMA(fastPeriod,**{name:_EMANames[0]})
+            self.getEMA(slowPeriod,**{name:_EMANames[1]})
+            self[diffEMAName]=self[_EMANames[0]]-self[_EMANames[1]]
+            del self[_EMANames[0]]
+            del self[_EMANames[1]]
+        return objToFrames(self)
+    
+    def getRSI(self, offset = 5, paddings=np.nan, **namesAndLaggedNames):
+        for name,laggedName in namesAndLaggedNames.items():
+            difflist=self.loc[:,name].diff(1)
+            RSIlist=[]
+            for i in range(offset,len(difflist)):
+                RSIlist.append(100*sum(difflist[i-offset+1:i+1]+abs(difflist[i-offset+1:i+1]))/2/sum(abs(difflist[i-offset+1:i+1])))
+            self.loc[:,laggedName]= [paddings]*offset+RSIlist
+        return objToFrames(self)
+      
+    def simpleReturn(self,offset = 1,**namesAndLaggedNames):
+        """  
+        frm = Frames({"A":[1,4,2,3,5],"B":[1.1,2.1,3.1,4.1,5.1]})
+        print(frm.simpleReturn(A='returnA'))
+           A    B  returnA
+        0  1  1.1        0
+        1  4  2.1        3
+        2  2  3.1       -2
+        3  3  4.1        1
+        4  5  5.1        2
+        """       
+        return objToFrames(self.getReturn(offset, useLogReturn = False, **namesAndLaggedNames))
+
+    def logReturn(self,offset = 1,**namesAndLaggedNames):
+        """
+        frm = Frames({"A":[1,4,2,3,5],"B":[1.1,2.1,3.1,4.1,5.1]})
+        print(frm.logReturn(A='returnA'))
+           A    B   returnA
+        0  1  1.1  0.000000
+        1  4  2.1  1.386294
+        2  2  3.1 -0.693147
+        3  3  4.1  0.405465
+        4  5  5.1  0.510826         
+        """
+        return objToFrames(self.getReturn(offset, useLogReturn = True, **namesAndLaggedNames))
+
+    def summary(self, removeOutliers = False, cutoffSigma = None):
+        """
+        frm = Frames({"A":[NA,4,NA,3,5],"B":[NA,2.1,3.1,4.1,5.1],"C":["a","b","c","d","e"]})
+        print(frm) 
+            A    B  C
+        0 NaN  NaN  a
+        1   4  2.1  b
+        2 NaN  3.1  c
+        3   3  4.1  d
+        4   5  5.1  e
+        print(frm.summary())
+          column       std  max  nans  mean  min
+        0      A  1.000000  5.0     2   4.0  3.0
+        1      B  1.290994  5.1     1   3.6  2.1
+        """
+        _frm = self.describe().iloc[[2,7,1,3],:]          
+        numericColNames= list(_frm.dtypes.index)
+        numOfNAs=self.loc[:,numericColNames].apply(lambda x: sum(x.isnull()))
+        _frm.loc['nans']=numOfNAs
+        _frm.loc["column"]=numericColNames
+        frm3=objToFrame(_frm.T).deleteIndex()
+        return objToFrames(frm3.iloc[:,[0,5,1,4,2,3]])        
+        #print(frm3.reindex(axis=1,["Column","Std","Max","Nans","Mean","Min"]))
+    
+    def replaceColumnsFromUfuncs(self, **addNameAndUfuncs):
+        """        
+        >>>frm = Frames({'A':[1,NA,3,4,7],'B':[2,1,3.1,4.1,NA]})
+        >>>frm.replaceColumnsFromUfuncs(AB = lambda A,B: A+B, A_B = lambda A,B: A-B)
+        >>>print(frm)       
+            A    B   AB  A_B
+        0   1  2.0  3.0 -1.0
+        1 NaN  1.0  NaN  NaN
+        2   3  3.1  6.1 -0.1
+        3   4  4.1  8.1 -0.1
+        4   7  NaN  NaN  NaN   
+        """  
+        values = self._valuesFromUfuncs(addNameAndUfuncs.values())
+        for i,addName in  enumerate(addNameAndUfuncs.keys()):         
+            self.loc[:,addName]=values[i]
+        return objToFrames(self)        
+          
+    def _valuesFromUfuncs(self,Ufuncs):
+        # 输入n个函数(list),输出n列values,行数与计算数据长度一样        
+        values=[]         
+        for ufunc in Ufuncs:
+            argNames=inspect.getargspec(ufunc)[0] #取出自定义函数的参数名
+            #取参数对应的列          
+            columns=[self.loc[:,argNames[i]]  for i in range(len(argNames))] 
+            values.append(ufunc(*columns)) #计算并加新列
+        return values   #返回类型是list
+        
+#    def merge0(self, other, keyColNames, joinType = 'Left'):
+#        return objToFrames(self.merge(self, other, keyColNames, joinType))
+
+    def groupToFrame3D(self,keyColNames):
+        """
+        frm = Frames({"Key1":["A","A","B","C","B","A"],"Key2":[0,0,2,3,4,5],"v2":[1,0,8,9,10,11]})
+        frm1=frm.groupToFrame3D(["Key1"])
+        print(frm1["A"][0])；print(frm1["B"][0])；print(frm1["C"][0])
+          Key1  Key2  v2
+        0    A     0   1
+        1    A     0   0
+        5    A     5  11
+          Key1  Key2  v2
+        2    B     2   8
+        4    B     4  10
+          Key1  Key2  v2
+        3    C     3   9
+
+        frm = Frames({"Key1":["A","A","B","C","B","A"],"Key2":[0,0,2,3,4,5],"v2":[1,0,8,9,10,11]})
+        frm1=frm.groupToFrame3D(["Key1","Key2"])
+        for key, [values] in frm1.items(): print(key); print(values)
+        ('A', 0)
+        Key1  Key2  v2
+        0    A     0   1
+        1    A     0   0
+        ('A', 5)
+        Key1  Key2  v2
+        5    A     5  11
+        ('B', 2)
+          Key1  Key2  v2
+        2    B     2   8
+        ('B', 4)
+          Key1  Key2  v2
+        4    B     4  10
+        ('C', 3)
+          Key1  Key2  v2
+        3    C     3   9
+        """
+        if keyColNames == None:
+           raise "no key error"
+        dict0={}
+        for keyName,group in self.groupby(keyColNames):
+            dict0[keyName] = [objToFrames(group)]
+        return objToFrames(dict0)  #return Frame3D=Frames({key1:[frm],key2:[frm],...}) 
+
+    def names(self):
+        """        
+        print(Frames({"A":[1,2,3],"B":[11,22,33]}).names())
+        ['A', 'B']
+        """        
+        return list(self.axes[1])  #list 0f Frmaes'columns name
+
+    def to_frame(self): #group的逆操作
+        """        
+        frm=Frames({"A":[1,2,1,2],"B":[11,22,33,44]})
+        print(frm.groupToFrame3D(["A"]).to_frame())
+           A   B
+        0  1  11
+        2  1  33
+        1  2  22
+        3  2  44
+        """
+        _frm0 = objToFrames([]) 
+        for key,[_frm] in self.items():
+            _frm0 = _frm0.append(_frm)
+        return _frm0    
+#   def lag1(self, **keysAndOffsets,laggedColNames = None,paddings = None, suffix = None):
+    def lag1(self, paddings=None,**keysAndOffsets):
+        """
+        frm = Frames({"Key":["A","B","C","D","E"],"A":[1,NA,3,4,5],"B":[NA,6,7,8,9]})
+        print(frm.lag1(A=-1,B=2))
+
+            A   B Key  Blag2  Alag-1
+        0   1 NaN   A    NaN     NaN
+        1 NaN   6   B    NaN       3
+        2   3   7   C    NaN       4
+        3   4   8   D      6       5
+        4   5   9   E      7       5
+        """        
+        for key, offset in keysAndOffsets.items():
+            self.lag([key], offset,laggedColNames="lag")
+        return objToFrames(self)       
+    def merge0(self, other, keyColNames, joinType = 'left'):
+        """        
+        frm=Frames({"A":[0,1,2,3,4,5],"B":[2,3,4,5,6,7]})
+        frm1=Frames({"A":[2,4,0,6,8,9],"C":[22,44,0,66,88,99]})
+        print(frm.merge0(frm1,["A"]))
+           A  B   C
+        0  0  2   0
+        1  1  3 NaN
+        2  2  4  22
+        3  3  5 NaN
+        4  4  6  44
+        5  5  7 NaN
+        """
+        return objToFrames(self.merge(other, on = keyColNames, how = joinType))
+
+    def addColumnsFromWrapper(self, key1s,uFuncs):
+        for key0, [frm]   in self.items():         
+            self[key0][0][key1s] = frm._valuesFromUfuncs(uFuncs) #计算每个frame的新增列
+        return self
+
+    def addFramesToFrame3D(self, keys,frames):
+        for key,frame in zip(keys,frames):
+            self[key] = [frame]
+        return self
+    
+    def frm3DToExcel(self,xlsFileName):
+        writer = pd.ExcelWriter(xlsFileName, engine='xlsxwriter')
+        for key in self.axes[1]:
+            sheet_name = key 
+            _frm = self[key][0]
+            _frm.to_excel(writer,sheet_name = key)
+
+    def deleteIndex(self):
+        """
+        frm = Frames({"Key":["A","B","C","D"],"v1":[0,1,2,3],"v2":[6,7,8,9]})
+        print(objToFrames(frm.drop(0)).deleteIndex())
+          Key  v1  v2
+        0   B   1   7
+        1   C   2   8
+        2   D   3   9
+        """
+        return objToFrames(self.from_dict(dict(zip(self.axes[1],zip(*self.values)))))  
+
+
+
+    def filterInSet(self, isIn=True,**colNamesAndSets):        
+        """
+        返回：由“满足a[i,j] in set[j]的行”组成的frm         
+        frm = Frames({"K":["a","b","c","d"],"A":[0,1,1,3],"B":[6,7,7,9]})
+        print(frm.filterInSet(A=[1]))
+        print(frm.filterInSet(**{"A":[1],"B":[7]}))
+           A  B  K
+        1  1  7  b
+        2  1  7  c   两个表一样
+        """ 
+        arr01= np.array([True]* self.shape[0]) 
+        for colName, _set in colNamesAndSets.items():
+            arr01 &= np.array(self.loc[:,colName].isin(_set if isinstance(_set,list) else [_set]))
+        return objToFrames(self.loc[arr01 if isIn else ~arr01])
+
+    def filterIn(self,ufunc=None,isIn=True,**colNameAndValues):
+        """
+        frm = Frames({"k":["a","b","c","d"],"A":[0,1,1,3],"B":[6,7,7,9]})
+        print(frm.filterIn(A=1,B=7))
+        print(frm.filterIn(**{"A":1,"B":7}))
+        print(frm.filterIn(lambda A,B: (A>0) & (B<8)))
+           A  B   k
+        1  1  7   b
+        2  1  7   c
+        """
+        if hasattr(ufunc,'__call__'):  #是否是函数类型      
+           argNames=inspect.getargspec(ufunc)[0] #取出自定义函数的参数名
+           columns=[self.loc[:,argNames[i]]  for i in range(len(argNames))] #取参数对应的列          
+           ifSelect=ufunc(*columns) if isIn else ~ufunc(*columns)                
+           return objToFrames(self.loc[ifSelect])  
+        else:        
+           return self.filterInSet(isIn,**colNameAndValues)
+
+    def filterOut(self,ufunc=None,**colNameAndValues):
+        """
+        #返回不满足条件的行组成的表. 原frm未改。问题：index是否要重排    
+        frm = Frames({"K":["a","b","c","d"],"A":[0,1,1,3],"B":[6,7,7,9]})
+        print(frm.filterOut(A=[1],B=7))
+        print(frm.filterOut(**{"A":1,"B":[7]}))
+        print(frm.filterOut(lambda A,B: (A>0) & (B<8))) #输出的三个表相同
+           A  B  K
+        0  0  6  a
+        3  3  9  d
+        """  
+        return self.filterIn(ufunc,isIn=False,**colNameAndValues)
+
+    def Print(self):
+        """        
+        frm = Frames({"code":["0001","0002","0003","9999"],\
+        "name":["Margaret","John.smith","Mary","Taylor"],\
+        "wage":[199.45,387.12,777.5,9999.0],\
+        "ifparty":[True,False,True,False]})
+        frm.print()
+        +------+---------+------------+--------+
+        | code | ifparty |    name    |  wage  |
+        +------+---------+------------+--------+
+        | 0001 |   True  |  Margaret  | 199.45 |
+        | 0002 |  False  | John.smith | 387.12 |
+        | 0003 |   True  |    Mary    | 777.5  |
+        | 9999 |  False  |   Taylor   | 9999.0 |
+        +------+---------+------------+--------+
+
+
+        """
+        from prettytable import PrettyTable
+        x = PrettyTable(list(self.axes[1]))  
+        x.align[self.axes[1][0]] = "l"# Left align 
+        x.padding_width = 1# One space between column edges and contents (default)
+        for row in self.values:         
+            x.add_row(row)
+        print(x) 
+
+
+
+
+
+
