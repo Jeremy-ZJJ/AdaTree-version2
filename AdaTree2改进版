@@ -30,8 +30,8 @@ def getLabel(arr):
     return list0
 
 #载入期货基础数据，并生成各期指标
-def getIndicator():
-    frm=gd.getFutureData('au')
+def getIndicator(future='au'):
+    frm=gd.getFutureData(future)
     frm=frm[['Open','High','Low','Close','Volume']]
         
     paraList=getPara()   
@@ -56,9 +56,9 @@ def getIndicator():
     
 #将用于建模的数据进行移动窗口划分为一系列的训练集和测试集
 #可以通过限制order的范围，来分离出样本外数据集
-def getTrainTestData(trainNum=60,testNum=10,order=0,step=10):
+def getTrainTestData(future='au',trainNum=60,testNum=10,order=0,step=10):
     
-    frm=getIndicator()
+    frm=getIndicator(future)
     
     trainBegin=order*step
     trainEnd=testBegin=order*step+trainNum
@@ -67,16 +67,19 @@ def getTrainTestData(trainNum=60,testNum=10,order=0,step=10):
     trainData=frm.iloc[trainBegin:trainEnd]
     testData=frm.iloc[testBegin:testEnd]
     
+    trainLabel=trainData['Label_0']
+    testLabel=testData['Label_0']
+    
+    del trainData['Label_0']
+    del testData['Label_0']
+    
     trainMean=np.mean(trainData,axis=0)
     trainStd=np.std(trainData,axis=0)
     trainData=(trainData-trainMean)/trainStd
     testData=(testData-trainMean)/trainStd
     
-    trainData.loc[:,'Label']=np.sign(trainData['Label_0'])
-    testData.loc[:,'Label']=np.sign(testData['Label_0'])
-    
-    del trainData['Label_0']
-    del testData['Label_0']
+    trainData.loc[:,'Label']=np.sign(trainLabel)
+    testData.loc[:,'Label']=np.sign(testLabel)
 
     return trainData,testData
 
@@ -101,7 +104,7 @@ def calculCorr(trainData,indicatorNum=5):
 
 #观察选出的因子组合的走势
 def plotFactorCurve(indicatorNum=5):
-    trainData,testData=getTrainTestData(trainNum=60,testNum=10,order=0,step=10,out=0)
+    trainData,testData=getTrainTestData(future='au',trainNum=60,testNum=10,order=0,step=10,out=0)
     minCorrGroup,minCorr=calculCorr(trainData,indicatorNum=indicatorNum)
     figure=plt.figure()
     ax=figure.add_subplot(1,1,1)
@@ -112,15 +115,14 @@ def plotFactorCurve(indicatorNum=5):
     return
 
 #测算在给定参数下任意一组训练集和测试集的训练和测试准确率
-def testNFeat(indicatorNum=5,max_depth=3,n_estimators=30,trainNum=60,testNum=10,order=0,step=10):
-    trainData,testData=getTrainTestData(trainNum=trainNum,testNum=testNum,order=order,step=step)        
+def testNFeat(future='au',indicatorNum=5,max_depth=3,n_estimators=30,trainNum=60,testNum=10,order=0,step=10):
+    trainData,testData=getTrainTestData(future=future,trainNum=trainNum,testNum=testNum,order=order,step=step)        
     y_train=trainData.iloc[:,-1]
     y_test=testData.iloc[:,-1]
     minCorrGroup,minCorr=calculCorr(trainData,indicatorNum=indicatorNum)
     
     trees = tree.DecisionTreeClassifier(criterion='entropy', max_depth=max_depth,random_state=0)
     ada = AdaBoostClassifier(base_estimator=trees,n_estimators=n_estimators, learning_rate=0.1,random_state=0)
-    
     featList=[]
     for feat in minCorrGroup:
         featList.append(feat)
@@ -139,6 +141,8 @@ def testNFeat(indicatorNum=5,max_depth=3,n_estimators=30,trainNum=60,testNum=10,
     ada = ada.fit(X_train, y_train)
     y_train_pred = ada.predict(X_train)
     y_test_pred = ada.predict(X_test)
+    y_test_pred_proba=ada.decision_function(X_test)
+    #print (y_test,y_test_pred,y_test_pred_proba)
 
     ada_train = metrics.accuracy_score(y_train, y_train_pred) 
     ada_test = metrics.accuracy_score(y_test, y_test_pred) 
@@ -173,8 +177,8 @@ def calculMean(list0,trainNum,step):
 
 #将整个数据集分割成前600多条滚动训练和测试集，以及最后一百条样本外测试集
 #测算前600多条数据分割成的一系列训练集和测试集，在各个参数下的训练和测试准确率走势
-def plotAccuracyCurve(XLabel='n_estimators'):
-    frm=getIndicator()
+def plotAccuracyCurve(future='au',XLabel='n_estimators'):
+    frm=getIndicator(future=future)
     length=len(frm)-100
     ada_trainList=[]
     ada_testList=[]
@@ -205,17 +209,17 @@ def plotAccuracyCurve(XLabel='n_estimators'):
             orderLength=(length-trainTest[i][0]-trainTest[i][1])//step+1        
         for order in range(orderLength):
             if XLabel=='n_estimators':
-                ada_train,ada_test,tree_train,tree_test=testNFeat(indicatorNum=5,max_depth=3,n_estimators=i,trainNum=30,testNum=1,order=order,step=step)
+                ada_train,ada_test,tree_train,tree_test=testNFeat(future=future,indicatorNum=5,max_depth=3,n_estimators=i,trainNum=30,testNum=1,order=order,step=step)
                 print (i,order,ada_train,ada_test,tree_train,tree_test)
             if XLabel=='indicatorNum':            
-                ada_train,ada_test,tree_train,tree_test=testNFeat(indicatorNum=i,max_depth=3,n_estimators=20,trainNum=30,testNum=1,order=order,step=step)
+                ada_train,ada_test,tree_train,tree_test=testNFeat(future=future,indicatorNum=i,max_depth=3,n_estimators=20,trainNum=30,testNum=1,order=order,step=step)
                 print (i,order,ada_train,ada_test,tree_train,tree_test)
             if XLabel=='max_depth':            
-                ada_train,ada_test,tree_train,tree_test=testNFeat(indicatorNum=5,max_depth=i,n_estimators=20,trainNum=30,testNum=1,order=order,step=step)
+                ada_train,ada_test,tree_train,tree_test=testNFeat(future=future,indicatorNum=5,max_depth=i,n_estimators=20,trainNum=30,testNum=1,order=order,step=step)
                 print (i,order,ada_train,ada_test,tree_train,tree_test)
             if XLabel=='Num':
                 train_num=trainTest[i][0];test_num=trainTest[i][1]
-                ada_train,ada_test,tree_train,tree_test=testNFeat(indicatorNum=5,max_depth=3,n_estimators=20,trainNum=train_num,testNum=test_num,order=order,step=step)
+                ada_train,ada_test,tree_train,tree_test=testNFeat(future=future,indicatorNum=5,max_depth=3,n_estimators=20,trainNum=train_num,testNum=test_num,order=order,step=step)
                 print (i,order,ada_train,ada_test,tree_train,tree_test)
             
             ada_trainOrderList.append(ada_train)
@@ -244,24 +248,24 @@ def plotAccuracyCurve(XLabel='n_estimators'):
 #上一条函数确定相对较优参数组之后，该函数进行进一步的验证，通过验证则测试在样本外数据上的表现
 #outsample=0时，程序对前600多条数据生成的滚动训练集，测试集计算预测准确率
 #outsample=1时，程序对最后100条样本外数据进行滚动预测
-def testNFeatAveOutput(indicatorNum=5,max_depth=3,n_estimators=20,trainNum=60,testNum=10,outsample=0):
+#plot=1时，画出训练和测试的准确率分布图
+def testNFeatAveOutput(future='au',indicatorNum=5,max_depth=3,n_estimators=20,trainNum=30,testNum=1,step=1,outsample=1,plot=1):
     ada_trainOrderList=[]
     ada_testOrderList=[]
     tree_trainOrderList=[]
     tree_testOrderList=[]
-    frm=getIndicator()
+    frm=getIndicator(future=future)
     length=len(frm)-100
-    step=10
     
     if outsample==0:
         orderRange=range((length-trainNum-testNum)//step+1)
     if outsample==1:
         orderRange=range((length-trainNum-testNum)//step+1,(len(frm)-trainNum-testNum)//step+1)
-    
+    #import pdb;pdb.set_trace()
     for order in orderRange:
-        ada_train,ada_test,tree_train,tree_test=testNFeat(indicatorNum=indicatorNum,max_depth=max_depth,n_estimators=n_estimators,trainNum=trainNum,
+        ada_train,ada_test,tree_train,tree_test=testNFeat(future=future,indicatorNum=indicatorNum,max_depth=max_depth,n_estimators=n_estimators,trainNum=trainNum,
                                                           testNum=testNum,order=order,step=step)
-        print (ada_train,ada_test,tree_train,tree_test)
+        #print (ada_train,ada_test,tree_train,tree_test)
         ada_trainOrderList.append(ada_train)
         ada_testOrderList.append(ada_test)
         tree_trainOrderList.append(tree_train)
@@ -271,23 +275,48 @@ def testNFeatAveOutput(indicatorNum=5,max_depth=3,n_estimators=20,trainNum=60,te
     tree_testMean=calculMean(tree_testOrderList,trainNum,step)
     ada_trainMean=calculMean(ada_trainOrderList,trainNum,step)
     ada_testMean=calculMean(ada_testOrderList,trainNum,step)
-    print('Decision tree train/test accuracies %.3f/%.3f,std %.3f/%.3f'% (tree_trainMean,tree_testMean,np.std(tree_trainOrderList),np.std(tree_testOrderList)))
-    print('AdaBoost train/test accuracies %.3f/%.3f,std %.3f/%.3f'% (ada_trainMean,ada_testMean,np.std(ada_trainOrderList),np.std(ada_testOrderList)))
+    print(future+' Decision tree train/test accuracies %.3f/%.3f'% (tree_trainMean,tree_testMean))
+    print(future+' AdaBoost train/test accuracies %.3f/%.3f'% (ada_trainMean,ada_testMean))
+    if plot==1:
+        figure=plt.figure()
+        ax=figure.add_subplot(1,1,1)
+        ax.plot(ada_trainOrderList,'r',label='ada_train')
+        ax.plot(ada_testOrderList,'y',label='ada_test')
+        ax.plot(tree_trainOrderList,'b',label='tree_train')
+        ax.plot(tree_testOrderList,'c',label='tree_test')
+        ax.set_xlabel('Order',fontsize=12)
+        ax.set_ylabel('Accuracy',fontsize=12)
+    return tree_testMean,ada_testMean
+
+def testAllFuture():
+    futureList=gd.getFutureNames()
+    futureList0=[]
+    tree_testList=[]
+    ada_testList=[]
+    for future in futureList:
+        frm=getIndicator(future=future)
+        if len(frm)>100:
+            futureList0.append(future)
+            tree_testMean,ada_testMean=testNFeatAveOutput(future=future,indicatorNum=5,max_depth=3,n_estimators=20,trainNum=30,testNum=1,step=1,outsample=1,plot=0)
+            tree_testList.append(tree_testMean)
+            ada_testList.append(ada_testMean)
+    return tree_testList,ada_testList
+
+def plotAllFuture(a,b):
     figure=plt.figure()
     ax=figure.add_subplot(1,1,1)
-    ax.plot(ada_trainOrderList,'r',label='ada_train')
-    ax.plot(ada_testOrderList,'y',label='ada_test')
-    ax.plot(tree_trainOrderList,'b',label='tree_train')
-    ax.plot(tree_testOrderList,'c',label='tree_test')
-    ax.set_xlabel('Order',fontsize=12)
+    ax.plot(a,'r',label='tree_test')
+    ax.plot(b,'b',label='ada_test')
+    plt.legend(loc='best')
+    ax.set_xlabel('Future',fontsize=12)
     ax.set_ylabel('Accuracy',fontsize=12)
-    return ada_trainOrderList,ada_testOrderList,tree_trainOrderList,tree_testOrderList
-    
+    return 
+
 #该程序用于将adaboost和DecisioTree在二维情况下可视化
-def testTwoFeat(firstFeat=5,secondFeat=13,plot=False):
+def testTwoFeat(future='au',firstFeat=5,secondFeat=13,plot=False):
     trees = tree.DecisionTreeClassifier(criterion='entropy', max_depth=3,random_state=0)
     ada = AdaBoostClassifier(base_estimator=trees,n_estimators=30, learning_rate=0.1,random_state=0)
-    trainData,testData=getTrainTestData(trainNum=60,testNum=10,order=10,step=10)    
+    trainData,testData=getTrainTestData(future=future,trainNum=60,testNum=10,order=10,step=10)    
     y_train,X_train=trainData.iloc[:,-1],trainData.iloc[:,:-1]
     y_test,X_test=testData.iloc[:,-1],testData.iloc[:,:-1]
     feat=X_train.columns
